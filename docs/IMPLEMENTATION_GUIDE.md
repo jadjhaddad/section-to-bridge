@@ -48,7 +48,7 @@
 
 📂 **Location:** `BridgeSectionTransfer.Core/Models/`
 
-- [ ] **2.1** Create `Point2D.cs`
+- [x] **2.1** Create `Point2D.cs`
   ```csharp
   public class Point2D
   {
@@ -58,7 +58,7 @@
   }
   ```
 
-- [ ] **2.2** Create `Polygon.cs`
+- [x] **2.2** Create `Polygon.cs`
   ```csharp
   public class Polygon
   {
@@ -71,7 +71,7 @@
   public enum PolygonType { Solid = 1, Opening = 2 }
   ```
 
-- [ ] **2.3** Create `ReferencePoint.cs`
+- [x] **2.3** Create `ReferencePoint.cs`
   ```csharp
   public class ReferencePoint
   {
@@ -81,7 +81,7 @@
   }
   ```
 
-- [ ] **2.4** Create `MaterialProperties.cs`
+- [x] **2.4** Create `MaterialProperties.cs`
   ```csharp
   public class MaterialProperties
   {
@@ -91,7 +91,7 @@
   }
   ```
 
-- [ ] **2.5** Create `DeckSection.cs`
+- [x] **2.5** Create `DeckSection.cs`
   ```csharp
   public class DeckSection
   {
@@ -112,7 +112,7 @@
 
 📂 **Location:** `BridgeSectionTransfer.Core/Services/`
 
-- [ ] **3.1** Create JSON DTOs in `JsonDtos.cs`
+- [x] **3.1** Create JSON DTOs in `JsonDtos.cs`
   ```csharp
   public class BridgeDeckSectionsData
   {
@@ -156,13 +156,13 @@
   // Add ReferencePointDto and MaterialPropertiesDto similarly
   ```
 
-- [ ] **3.2** Create `DeckSectionJsonSerializer.cs` with mapping methods
+- [x] **3.2** Create `DeckSectionJsonSerializer.cs` with mapping methods
   - See `DOCUMENTATION_PART6_JSON_FORMAT.md` for complete code
   - Implement `SerializeToFile()`
   - Implement `DeserializeFromFile()`
   - Add mapping methods `MapToDto()` and `MapFromDto()`
 
-- [ ] **3.3** Configure JSON options
+- [x] **3.3** Configure JSON options
   ```csharp
   private static readonly JsonSerializerOptions Options = new()
   {
@@ -178,7 +178,7 @@
 
 📂 **Location:** `BridgeSectionTransfer.Core/Services/`
 
-- [ ] **4.1** Create `GeometryCalculator.cs`
+- [x] **4.1** Create `GeometryCalculator.cs`
   - Implement `CalculateArea()` - Shoelace formula
   - Implement `CalculateCentroid()` - Polygon centroid formula
   - Implement `EnsureClockwise()` - Direction validation
@@ -193,9 +193,9 @@ See `DOCUMENTATION_PART4_UIUX_REFLINES.md` section 10.3 for complete code.
 
 #### 🔑 KEY CHANGE: Multi-Select Voids
 
-- [ ] **5.1** Create `Commands.cs` with `[CommandMethod("ExportDeckSection")]`
+- [x] **5.1** Create `Commands.cs` with `[CommandMethod("ExportDeckSection")]`
 
-- [ ] **5.2** Implement **Multi-Select for Voids**
+- [x] **5.2** Implement **Multi-Select for Voids**
   ```csharp
   [CommandMethod("ExportDeckSection")]
   public void ExportDeckSection()
@@ -284,7 +284,7 @@ See `DOCUMENTATION_PART4_UIUX_REFLINES.md` section 10.3 for complete code.
   }
   ```
 
-- [ ] **5.3** Implement polyline extraction
+- [x] **5.3** Implement polyline extraction
   ```csharp
   private Polygon ExtractPolygon(Polyline poly, string name)
   {
@@ -300,7 +300,7 @@ See `DOCUMENTATION_PART4_UIUX_REFLINES.md` section 10.3 for complete code.
   }
   ```
 
-- [ ] **5.4** Implement reference point selection
+- [x] **5.4** Implement reference point selection
   ```csharp
   private ReferencePoint GetReferencePoint(Editor ed, Point2D centroid)
   {
@@ -354,7 +354,7 @@ See `DOCUMENTATION_PART4_UIUX_REFLINES.md` section 10.3 for complete code.
   }
   ```
 
-- [ ] **5.5** Export to JSON
+- [x] **5.5** Export to JSON
   ```csharp
   // Get save file path
   SaveFileDialog sfd = new SaveFileDialog
@@ -381,13 +381,13 @@ See `DOCUMENTATION_PART4_UIUX_REFLINES.md` section 10.3 for complete code.
 
 📂 **Location:** `BridgeSectionTransfer.CSiBridge/`
 
-- [ ] **6.1** Create `CSiBridgeImporter.cs`
+- [x] **6.1** Create `CSiBridgeImporter.cs`
   - Implement `Connect()` - attach to running CSiBridge
   - Implement `ImportSection()` - main import logic
   - Implement `CreatePolygon()` - add new polygon
   - Implement `ModifyPolygon()` - modify existing polygon
 
-- [ ] **6.2** Key methods
+- [x] **6.2** Key methods
   ```csharp
   public bool Connect()
   {
@@ -412,7 +412,7 @@ See `DOCUMENTATION_PART4_UIUX_REFLINES.md` section 10.3 for complete code.
   }
   ```
 
-- [ ] **6.3** Apply reference point
+- [x] **6.3** Apply reference point
   ```csharp
   if (section.ReferencePoint != null && options.SetReferencePoint)
   {
@@ -435,7 +435,7 @@ See `DOCUMENTATION_PART5_CSHARP_IMPLEMENTATION.md` for complete CSiBridge import
 
 📂 **Location:** `BridgeSectionTransfer.Console/`
 
-- [ ] **7.1** Create `Program.cs`
+- [x] **7.1** Create `Program.cs`
   ```csharp
   static void Main(string[] args)
   {
