@@ -1,0 +1,920 @@
+Option Explicit
+
+' ====== CIVIL 3D / AUTOCAD ? XML BRIDGE DECK SECTION EXPORTER ======
+' Version: DeckXML-V2.2-LB-Safe (Late Binding + No-Infinite-Loop Guards + Safe Array Checks)
+' Date: 2025-10-27
+
+Private Const MAX_RETRIES As Long = 5
+Private Const MAX_VOID_COUNT As Long = 200
+
+' ========================= ENTRY POINT =========================
+Public Sub ExportDeckSection()
+    Dim acad As Object          ' AutoCAD.Application
+    Dim doc As Object           ' ActiveDocument
+    Dim util As Object          ' doc.Utility
+
+    On Error GoTo Fatal
+
+    Set acad = AttachToRunningAutoCAD()
+    If acad Is Nothing Then
+        MsgBox "No running AutoCAD/Civil 3D instance found. Open your drawing and retry.", vbCritical, "Attachment Error"
+        Exit Sub
+    End If
+    If acad.Documents.Count = 0 Then
+        MsgBox "AutoCAD/Civil 3D has no active drawing. Open a drawing and retry.", vbExclamation, "No Active Drawing"
+        Exit Sub
+    End If
+
+    Set doc = acad.ActiveDocument
+    Set util = doc.Utility
+
+    util.prompt vbCrLf & "=== BRIDGE DECK SECTION EXPORTER (DeckXML-V2.2-LB-Safe) ===" & vbCrLf
+    util.prompt "Exports bridge deck section geometry to XML for CSI Bridge." & vbCrLf
+    util.prompt "Axes: X = transverse (centerline at 0), Y = vertical (up positive)" & vbCrLf
+
+    Dim sectionName As String
+    Dim station As Double
+    Dim filePath As String
+    Dim exteriorPoints() As Double
+    Dim voidPoints() As Variant
+    Dim voidCount As Integer
+    Dim sectionArea As Double
+    Dim centroidX As Double, centroidY As Double
+
+    util.prompt vbCrLf & "--- Step 1: Setting Export File ---" & vbCrLf
+    filePath = GetExportFilePath(doc, util)
+    If LenB(filePath) = 0 Then
+        util.prompt "ERROR: No valid file path. Export cancelled." & vbCrLf
+        Exit Sub
+    End If
+    util.prompt "SUCCESS: Export file set to: " & filePath & vbCrLf
+
+    util.prompt vbCrLf & "--- Step 2: Section Information ---" & vbCrLf
+    sectionName = GetSectionName(util)
+    If LenB(sectionName) = 0 Then
+        util.prompt "ERROR: No valid section name. Export cancelled." & vbCrLf
+        Exit Sub
+    End If
+    util.prompt "SUCCESS: Section name set to: " & sectionName & vbCrLf
+
+    station = GetStationInfo(util)
+    util.prompt "SUCCESS: Station set to: " & Format$(station, "0.000") & " meters" & vbCrLf
+
+    util.prompt vbCrLf & "--- Step 3: Processing Section Geometry ---" & vbCrLf
+    If Not ProcessSectionGeometry(util, exteriorPoints, voidPoints, voidCount, sectionArea, centroidX, centroidY) Then
+        util.prompt "ERROR: Failed to process section geometry. Export cancelled." & vbCrLf
+        Exit Sub
+    End If
+    util.prompt "SUCCESS: Section geometry processed." & vbCrLf
+
+    util.prompt vbCrLf & "--- Step 4: Creating XML Export ---" & vbCrLf
+    If Not CreateAndSaveXML(sectionName, station, exteriorPoints, voidPoints, voidCount, _
+                            sectionArea, centroidX, centroidY, filePath, util) Then
+        util.prompt "ERROR: Failed to create XML file. Export cancelled." & vbCrLf
+        Exit Sub
+    End If
+
+    util.prompt vbCrLf & "=== EXPORT COMPLETED SUCCESSFULLY ===" & vbCrLf
+    util.prompt "Section Name: " & sectionName & vbCrLf
+    util.prompt "Station: " & Format$(station, "0.000") & " meters" & vbCrLf
+    util.prompt "Section Area: " & Format$(sectionArea, "0.0000") & " m²" & vbCrLf
+    util.prompt "Centroid: X=" & Format$(centroidX, "0.000") & ", Y=" & Format$(centroidY, "0.000") & vbCrLf
+    util.prompt "Exterior Points: " & ((UBound(exteriorPoints) + 1) \ 2) & vbCrLf
+    util.prompt "Interior Voids: " & CStr(voidCount) & vbCrLf
+    util.prompt "File Location: " & filePath & vbCrLf
+
+    ShowDataLimitations util
+    Exit Sub
+
+Fatal:
+    On Error Resume Next
+    If Not util Is Nothing Then
+        util.prompt "FATAL ERROR: " & Err.description & vbCrLf
+        util.prompt "Error Number: " & Err.Number & vbCrLf
+    Else
+        MsgBox "FATAL ERROR: " & Err.description & " (#" & Err.Number & ")", vbCritical
+    End If
+End Sub
+
+' ====================== ATTACHMENT (LATE BINDING) ======================
+Private Function AttachToRunningAutoCAD() As Object
+    On Error Resume Next
+    Dim app As Object
+    Set app = GetObject(, "AutoCAD.Application")
+    If app Is Nothing Then Set app = GetObject(, "AutoCAD.Application.24")
+    On Error GoTo 0
+    Set AttachToRunningAutoCAD = app
+End Function
+
+' ============================ FILE / PATH ==============================
+Private Function GetExportFilePath(doc As Object, util As Object) As String
+    On Error GoTo Errh
+
+    Dim fileName As String, directory As String, fullPath As String
+
+    fileName = util.GetString(False, "Enter XML export file name (without extension) <BridgeDeckSection>: ")
+    If LenB(fileName) = 0 Then fileName = "BridgeDeckSection"
+
+    fileName = Replace(fileName, " ", "_")
+    fileName = Replace(fileName, "\", "")
+    fileName = Replace(fileName, "/", "")
+    fileName = Replace(fileName, ":", "")
+    fileName = Replace(fileName, "*", "")
+    fileName = Replace(fileName, "?", "")
+    fileName = Replace(fileName, """", "")
+    fileName = Replace(fileName, "<", "")
+    fileName = Replace(fileName, ">", "")
+    fileName = Replace(fileName, "|", "")
+
+    util.prompt "Please select the folder to save the XML file..." & vbCrLf
+    directory = SelectFolder(util)
+
+    If LenB(directory) = 0 Then
+        util.prompt "No folder selected. Using current drawing directory..." & vbCrLf
+        On Error Resume Next
+        directory = CStr(doc.GetVariable("DWGPREFIX"))
+        On Error GoTo Errh
+        If LenB(directory) = 0 Then directory = "C:\Temp\"
+    End If
+
+    If Right$(directory, 1) <> "\" Then directory = directory & "\"
+    fullPath = directory & fileName & ".xml"
+
+    If Dir$(fullPath, vbNormal) <> "" Then
+        If MsgBox("File already exists:" & vbCrLf & fullPath & vbCrLf & "Overwrite?", _
+                  vbYesNo + vbExclamation, "File Exists") = vbNo Then
+            GetExportFilePath = ""
+            Exit Function
+        End If
+    End If
+
+    GetExportFilePath = fullPath
+    Exit Function
+Errh:
+    util.prompt "Error getting file path: " & Err.description & vbCrLf
+    GetExportFilePath = ""
+End Function
+
+Private Function SelectFolder(util As Object) As String
+    On Error GoTo Errh
+    Dim sh As Object, f As Object
+    Set sh = CreateObject("Shell.Application")
+    Set f = sh.BrowseForFolder(0, "Select folder to save XML file:", &H1, "")
+    If Not f Is Nothing Then
+        util.prompt "Selected folder: " & f.Self.Path & vbCrLf
+        SelectFolder = CStr(f.Self.Path)
+    Else
+        util.prompt "No folder selected." & vbCrLf
+        SelectFolder = ""
+    End If
+    Exit Function
+Errh:
+    util.prompt "Error selecting folder: " & Err.description & vbCrLf & "Will use default location instead." & vbCrLf
+    SelectFolder = ""
+End Function
+
+' ======================== SECTION / STATION ============================
+Private Function GetSectionName(util As Object) As String
+    On Error GoTo Errh
+    Dim nm As String
+    nm = util.GetString(True, "Enter bridge deck section name <DeckSection_01>: ")
+    If LenB(nm) = 0 Then nm = "DeckSection_01"
+    GetSectionName = Trim$(nm)
+    Exit Function
+Errh:
+    util.prompt "Error getting section name: " & Err.description & vbCrLf
+    GetSectionName = ""
+End Function
+
+Private Function GetStationInfo(util As Object) As Double
+    On Error GoTo Errh
+    Dim s As String, v As Double
+    s = util.GetString(False, "Enter station value (meters) <0.0>: ")
+    If LenB(s) = 0 Then
+        v = 0#
+    Else
+        v = CDbl(s)
+    End If
+    If v < 0# Then v = 0#
+    GetStationInfo = v
+    Exit Function
+Errh:
+    util.prompt "Error getting station: " & Err.description & vbCrLf
+    GetStationInfo = 0#
+End Function
+
+' ================= UTIL: SAFE ARRAY ALLOCATION CHECK ===================
+Private Function IsDblArrayAllocated(ByRef a() As Double) As Boolean
+    On Error GoTo NotAlloc
+    Dim tmp As Long
+    tmp = UBound(a)   ' will error if not allocated
+    IsDblArrayAllocated = True
+    Exit Function
+NotAlloc:
+    IsDblArrayAllocated = False
+End Function
+
+' ================= SELECTION + CONFIRMATION (SAFE) =====================
+Private Function PointsArrayToString(points() As Double) As String
+    If Not IsDblArrayAllocated(points) Then Exit Function
+    Dim s As String, i As Long, n As Long
+    n = (UBound(points) + 1) \ 2
+    For i = 0 To n - 1
+        s = s & " [" & (i + 1) & "] X=" & Format$(points(i * 2), "0.000") & _
+                ", Y=" & Format$(points(i * 2 + 1), "0.000") & vbCrLf
+    Next
+    PointsArrayToString = s
+End Function
+
+Private Function SelectPolylineWithConfirmation(util As Object, description As String, _
+    ByRef points() As Double, ByRef handleOut As String) As Boolean
+
+    Dim tries As Long
+    Dim obj As Object, pick As Variant, hnd As String
+
+    SelectPolylineWithConfirmation = False
+    For tries = 1 To MAX_RETRIES
+        On Error GoTo Escaped
+        util.prompt "Select a LIGHTWEIGHT POLYLINE for " & description & " (Attempt " & tries & " of " & MAX_RETRIES & ")." & vbCrLf
+        util.GetEntity obj, pick, "Select polyline: "
+        On Error GoTo 0
+
+        If LCase$(CStr(obj.ObjectName)) = LCase$("AcDbPolyline") Then
+            If ExtractPolylinePoints(obj, points, util) Then
+                On Error Resume Next
+                hnd = CStr(obj.Handle)
+                On Error GoTo 0
+                handleOut = hnd
+                MsgBox "Selected Polyline Handle: " & hnd & vbCrLf & _
+                       "Points Captured: " & CStr(((UBound(points) + 1) \ 2)) & vbCrLf & _
+                       PointsArrayToString(points), vbInformation, "Polyline Selection Confirmation"
+                SelectPolylineWithConfirmation = True
+                Exit Function
+            Else
+                MsgBox "Failed to extract points from the selected polyline.", vbCritical, "Extraction Error"
+            End If
+        Else
+            MsgBox "Selected object is not a lightweight polyline (AcDbPolyline).", vbCritical, "Selection Error"
+        End If
+
+        If tries < MAX_RETRIES Then
+            If MsgBox("Retry selecting the polyline?", vbYesNo + vbQuestion, "Retry?") = vbNo Then Exit For
+        End If
+        GoTo ContinueLoop
+
+Escaped:
+        If tries < MAX_RETRIES Then
+            If MsgBox("Selection cancelled/failed. Retry?", vbYesNo + vbQuestion, "Retry?") = vbNo Then Exit For
+        End If
+ContinueLoop:
+        DoEvents
+    Next tries
+End Function
+
+Private Function ExtractPolylinePoints(poly As Object, ByRef points() As Double, util As Object) As Boolean
+    On Error GoTo Errh
+    Dim coords As Variant, i As Long
+    coords = poly.Coordinates
+    ReDim points(UBound(coords)) As Double
+    For i = 0 To UBound(coords)
+        points(i) = CDbl(coords(i))
+    Next
+    ExtractPolylinePoints = True
+    Exit Function
+Errh:
+    util.prompt "ERROR extracting polyline points: " & Err.description & vbCrLf
+    ExtractPolylinePoints = False
+End Function
+
+' ====================== GEOMETRY WORKFLOW (VOIDS) ======================
+Private Function ProcessSectionGeometry(util As Object, _
+    ByRef exteriorPoints() As Double, _
+    ByRef voidPoints() As Variant, _
+    ByRef voidCount As Integer, _
+    ByRef sectionArea As Double, _
+    ByRef centroidX As Double, ByRef centroidY As Double) As Boolean
+
+    On Error GoTo Errh
+
+    Dim extHandle As String
+    Dim currentVoid() As Double, currentHandle As String
+    Dim voidHandles() As String
+    Dim i As Long, replaceIndex As Long
+    Dim voidArea As Double
+    Dim resp As VbMsgBoxResult
+
+    voidCount = 0
+    ReDim voidPoints(0 To 0)
+    ReDim voidHandles(0 To 0)
+
+    util.prompt vbCrLf & "=== SELECT EXTERIOR BOUNDARY ===" & vbCrLf
+    If Not SelectPolylineWithConfirmation(util, "exterior boundary", exteriorPoints, extHandle) Then
+        util.prompt "ERROR: No valid exterior boundary selected." & vbCrLf
+        ProcessSectionGeometry = False
+        Exit Function
+    End If
+
+    If Not IsDblArrayAllocated(exteriorPoints) Or UBound(exteriorPoints) < 5 Then
+        util.prompt "ERROR: Exterior boundary must have at least 3 points." & vbCrLf
+        ProcessSectionGeometry = False
+        Exit Function
+    End If
+
+    sectionArea = CalculatePolygonArea(exteriorPoints)
+    CalculatePolygonCentroid exteriorPoints, centroidX, centroidY
+    If sectionArea <= 0# Then
+        util.prompt "ERROR: Calculated area is zero/negative. Check polyline direction." & vbCrLf
+        ProcessSectionGeometry = False
+        Exit Function
+    End If
+    util.prompt "Exterior boundary selected and processed." & vbCrLf
+
+    Do
+        If voidCount >= MAX_VOID_COUNT Then
+            MsgBox "Maximum allowed voids reached (" & MAX_VOID_COUNT & "). Stopping selection.", vbExclamation, "Limit Reached"
+            Exit Do
+        End If
+
+        resp = MsgBox("Add another INTERIOR VOID? (Yes=add, No=finish, Cancel=abort export)", _
+                      vbYesNoCancel + vbQuestion, "Interior Void Input")
+
+        If resp = vbNo Then
+            Exit Do
+        ElseIf resp = vbCancel Then
+            util.prompt "User cancelled during void selection." & vbCrLf
+            ProcessSectionGeometry = False
+            Exit Function
+        End If
+
+        If SelectPolylineWithConfirmation(util, "interior void #" & (voidCount + 1), currentVoid, currentHandle) Then
+            replaceIndex = -1
+            For i = 0 To voidCount - 1
+                If voidHandles(i) = currentHandle Then
+                    replaceIndex = i
+                    Exit For
+                End If
+            Next
+
+            If UBound(currentVoid) >= 5 Then
+                voidArea = CalculatePolygonArea(currentVoid)
+                If replaceIndex >= 0 Then
+                    voidPoints(replaceIndex) = currentVoid
+                    voidHandles(replaceIndex) = currentHandle
+                    util.prompt "Notice: Duplicate void handle detected. Replaced interior void #" & (replaceIndex + 1) & "." & vbCrLf
+                    MsgBox "Duplicate void replaced at index #" & (replaceIndex + 1) & ".", vbInformation
+                Else
+                    voidCount = voidCount + 1
+                    ReDim Preserve voidPoints(0 To voidCount - 1)
+                    ReDim Preserve voidHandles(0 To voidCount - 1)
+                    voidPoints(voidCount - 1) = currentVoid
+                    voidHandles(voidCount - 1) = currentHandle
+                    util.prompt "Success: Interior void #" & voidCount & " added." & vbCrLf
+                End If
+                sectionArea = sectionArea - Abs(voidArea)
+            Else
+                util.prompt "ERROR: Void has insufficient points (min 3)." & vbCrLf
+                MsgBox "Void has insufficient points (min 3). Not accepted.", vbCritical
+            End If
+        Else
+            If MsgBox("No void selected. Continue without adding this void?", vbYesNo + vbQuestion, "Continue?") = vbNo Then
+                ProcessSectionGeometry = False
+                Exit Function
+            End If
+        End If
+
+        DoEvents
+    Loop
+
+    util.prompt "Interior void selection completed. Total voids: " & CStr(voidCount) & vbCrLf
+    ProcessSectionGeometry = True
+    Exit Function
+
+Errh:
+    util.prompt "ERROR in ProcessSectionGeometry: " & Err.description & vbCrLf
+    ProcessSectionGeometry = False
+End Function
+
+' ======================= AREA / CENTROID =======================
+Private Function CalculatePolygonArea(points() As Double) As Double
+    Dim area As Double, i As Long, j As Long, n As Long
+    n = (UBound(points) + 1) \ 2
+    For i = 0 To n - 1
+        j = (i + 1) Mod n
+        area = area + points(i * 2) * points(j * 2 + 1) _
+                    - points(j * 2) * points(i * 2 + 1)
+    Next
+    CalculatePolygonArea = Abs(area) / 2#
+End Function
+
+Private Sub CalculatePolygonCentroid(points() As Double, ByRef cx As Double, ByRef cy As Double)
+    Dim area As Double, i As Long, j As Long, n As Long, f As Double
+    Dim sx As Double, sy As Double
+    n = (UBound(points) + 1) \ 2
+    area = CalculatePolygonArea(points)
+    If Abs(area) < 0.0000000001 Then
+        For i = 0 To n - 1
+            sx = sx + points(i * 2)
+            sy = sy + points(i * 2 + 1)
+        Next
+        cx = sx / n: cy = sy / n
+        Exit Sub
+    End If
+    For i = 0 To n - 1
+        j = (i + 1) Mod n
+        f = (points(i * 2) * points(j * 2 + 1) - points(j * 2) * points(i * 2 + 1))
+        sx = sx + (points(i * 2) + points(j * 2)) * f
+        sy = sy + (points(i * 2 + 1) + points(j * 2 + 1)) * f
+    Next
+    area = area * 6#
+    cx = sx / area
+    cy = sy / area
+End Sub
+
+' ========================= XML CREATION =========================
+Private Function CreateAndSaveXML(sectionName As String, station As Double, _
+    exteriorPoints() As Double, voidPoints() As Variant, voidCount As Integer, _
+    sectionArea As Double, centroidX As Double, centroidY As Double, _
+    filePath As String, util As Object) As Boolean
+
+    On Error GoTo Errh
+
+    Dim fso As Object, tf As Object, xml As String
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set tf = fso.CreateTextFile(filePath, True)
+
+    xml = "<?xml version=""1.0"" encoding=""UTF-8""?>" & vbCrLf
+    xml = xml & "<BridgeDeckSections ExportDate=""" & Format$(Now, "yyyy-mm-dd hh:nn:ss") & _
+          """ ExportTool=""Civil3D Bridge Deck Exporter VBA v2.2"" Units=""Meters""" & _
+          " CoordinateSystem=""X=Transverse(CenterlineAt0), Y=Vertical(UpwardPositive)"">" & vbCrLf
+
+    xml = xml & CreateSectionXMLElement(sectionName, station, exteriorPoints, voidPoints, _
+                                        voidCount, sectionArea, centroidX, centroidY)
+    xml = xml & "</BridgeDeckSections>" & vbCrLf
+
+    tf.Write xml
+    tf.Close
+
+    util.prompt "SUCCESS: XML file saved to: " & filePath & vbCrLf
+    CreateAndSaveXML = True
+    Exit Function
+Errh:
+    util.prompt "ERROR creating XML: " & Err.description & vbCrLf
+    CreateAndSaveXML = False
+End Function
+
+Private Function CreateSectionXMLElement(sectionName As String, station As Double, _
+    exteriorPoints() As Double, voidPoints As Variant, voidCount As Integer, _
+    sectionArea As Double, centroidX As Double, centroidY As Double) As String
+
+    Dim xml As String, i As Long, j As Long, n As Long
+    Dim currentVoid() As Double
+
+    xml = "  <DeckSection Name=""" & sectionName & """ Station=""" & Format$(station, "0.000") & _
+          """ Area=""" & Format$(sectionArea, "0.000000") & _
+          """ CentroidX=""" & Format$(centroidX, "0.000000") & _
+          """ CentroidY=""" & Format$(centroidY, "0.000000") & """>" & vbCrLf
+
+    xml = xml & "    <MaterialProperties ConcreteStrength=""30.0"" Density=""2400.0"" ElasticModulus=""30000.0""/>" & vbCrLf
+
+    n = (UBound(exteriorPoints) + 1) \ 2
+    xml = xml & "    <ExteriorBoundary PointCount=""" & n & """>" & vbCrLf
+    For i = 0 To n - 1
+        xml = xml & "      <Point X=""" & Format$(exteriorPoints(i * 2), "0.000000") & _
+                    """ Y=""" & Format$(exteriorPoints(i * 2 + 1), "0.000000") & """/>" & vbCrLf
+    Next
+    xml = xml & "    </ExteriorBoundary>" & vbCrLf
+
+    If voidCount > 0 Then
+        xml = xml & "    <InteriorVoids VoidCount=""" & voidCount & """>" & vbCrLf
+        For i = 0 To voidCount - 1
+            currentVoid = voidPoints(i)
+            n = (UBound(currentVoid) + 1) \ 2
+            xml = xml & "      <Void Index=""" & i & """ PointCount=""" & n & """>" & vbCrLf
+            For j = 0 To n - 1
+                xml = xml & "        <Point X=""" & Format$(currentVoid(j * 2), "0.000000") & _
+                            """ Y=""" & Format$(currentVoid(j * 2 + 1), "0.000000") & """/>" & vbCrLf
+            Next
+            xml = xml & "      </Void>" & vbCrLf
+        Next
+        xml = xml & "    </InteriorVoids>" & vbCrLf
+    End If
+
+    xml = xml & "  </DeckSection>" & vbCrLf
+    CreateSectionXMLElement = xml
+End Function
+
+' ======================== DATA LIMITATIONS ========================
+Private Sub ShowDataLimitations(util As Object)
+    util.prompt vbCrLf & "=== DATA EXTRACTION LIMITATIONS ===" & vbCrLf
+    util.prompt "Defaults used for material properties and derived section properties." & vbCrLf
+    util.prompt "Review/update in CSI Bridge after import." & vbCrLf
+End Sub
+
+
+Sub ImportDeckSectionXML_Corrected()
+    Dim xmlDoc As Object
+    Dim deckSection As Object, exterior As Object
+    Dim pt As Object, void As Object, voids As Object, interiorVoids As Object
+    Dim ws As Worksheet
+    Dim i As Long, j As Long, rowIndex As Long
+    Dim filePath As String
+
+    ' === Check or create "DeckImport" sheet ===
+    On Error Resume Next
+    Set ws = ThisWorkbook.Sheets("DeckImport")
+    On Error GoTo 0
+    If ws Is Nothing Then
+        Set ws = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+        ws.name = "DeckImport"
+    Else
+        ws.Cells.Clear
+    End If
+
+    ' === Choose XML file ===
+    filePath = Application.GetOpenFilename("XML Files (*.xml), *.xml", , "Select Bridge Deck XML File")
+    If filePath = "False" Then Exit Sub
+
+    ' === Load XML ===
+    Set xmlDoc = CreateObject("MSXML2.DOMDocument")
+    xmlDoc.Load filePath
+    If xmlDoc.ParseError.ErrorCode <> 0 Then
+        MsgBox "Error in XML File: " & xmlDoc.ParseError.Reason, vbCritical
+        Exit Sub
+    End If
+
+    ' === Headers ===
+    rowIndex = 1
+    ws.Cells(rowIndex, 1).Value = "Section Name"
+    ws.Cells(rowIndex, 2).Value = "Station"
+    ws.Cells(rowIndex, 3).Value = "CentroidX"
+    ws.Cells(rowIndex, 4).Value = "CentroidY"
+    ws.Cells(rowIndex, 5).Value = "VoidCount"
+    rowIndex = rowIndex + 1
+
+    ' === Loop Deck Sections ===
+    For Each deckSection In xmlDoc.SelectNodes("//DeckSection")
+        Dim name As String, station As String, cx As String, cy As String
+        name = deckSection.getAttribute("Name")
+        station = deckSection.getAttribute("Station")
+        cx = deckSection.getAttribute("CentroidX")
+        cy = deckSection.getAttribute("CentroidY")
+
+        ' === ExteriorBoundary ===
+        Set exterior = deckSection.SelectSingleNode("ExteriorBoundary")
+        Dim extPointCount As Long
+        extPointCount = exterior.getAttribute("PointCount")
+
+        ' Write header data
+        ws.Cells(rowIndex, 1).Value = name
+        ws.Cells(rowIndex, 2).Value = station
+        ws.Cells(rowIndex, 3).Value = cx
+        ws.Cells(rowIndex, 4).Value = cy
+
+        ' Void count
+        Set interiorVoids = deckSection.SelectSingleNode("InteriorVoids")
+        If Not interiorVoids Is Nothing Then
+            ws.Cells(rowIndex, 5).Value = interiorVoids.getAttribute("VoidCount")
+        Else
+            ws.Cells(rowIndex, 5).Value = 0
+        End If
+        rowIndex = rowIndex + 1
+
+        ' Write ExteriorBoundary points
+        ws.Cells(rowIndex, 1).Value = "ExteriorBoundary"
+        rowIndex = rowIndex + 1
+        ws.Cells(rowIndex, 1).Value = "Index"
+        ws.Cells(rowIndex, 2).Value = "X"
+        ws.Cells(rowIndex, 3).Value = "Y"
+        rowIndex = rowIndex + 1
+        i = 1
+        For Each pt In exterior.SelectNodes("Point")
+            ws.Cells(rowIndex, 1).Value = i
+            ws.Cells(rowIndex, 2).Value = pt.getAttribute("X")
+            ws.Cells(rowIndex, 3).Value = pt.getAttribute("Y")
+            rowIndex = rowIndex + 1
+            i = i + 1
+        Next
+
+        ' Write Interior Voids (if any)
+        If Not interiorVoids Is Nothing Then
+            Set voids = interiorVoids.SelectNodes("Void")
+            ws.Cells(rowIndex, 1).Value = "InteriorVoids"
+            rowIndex = rowIndex + 1
+            For j = 0 To voids.Length - 1
+                Set void = voids.Item(j)
+                ws.Cells(rowIndex, 1).Value = "Interior_" & j
+                rowIndex = rowIndex + 1
+                ws.Cells(rowIndex, 1).Value = "Index"
+                ws.Cells(rowIndex, 2).Value = "X"
+                ws.Cells(rowIndex, 3).Value = "Y"
+                rowIndex = rowIndex + 1
+
+                Set ptList = void.SelectNodes("Point")
+                i = 1
+                For Each pt In ptList
+                    ws.Cells(rowIndex, 1).Value = i
+                    ws.Cells(rowIndex, 2).Value = pt.getAttribute("X")
+                    ws.Cells(rowIndex, 3).Value = pt.getAttribute("Y")
+                    rowIndex = rowIndex + 1
+                    i = i + 1
+                Next
+            Next
+        End If
+    Next
+
+    MsgBox "Bridge deck section import complete.", vbInformation
+End Sub
+
+Option Explicit
+
+Sub ComprehensivePolygonManager_FromExcel()
+    ' === 1. Connect to CSiBridge ===
+    Dim helper As CSiBridge1.cHelper
+    Dim bridgeObj As CSiBridge1.cOAPI
+    Dim sapModel As CSiBridge1.cSapModel
+    Dim BM As CSiBridge1.cBridgeModeler_1
+    Set helper = CreateObject("CSiBridge1.Helper")
+    Set bridgeObj = helper.GetObject("CSI.CSiBridge.API.SapObject")
+    If bridgeObj Is Nothing Then
+        MsgBox "CSiBridge not running or model not open.", vbCritical
+        Exit Sub
+    End If
+    Set sapModel = bridgeObj.sapModel
+    Set BM = sapModel.BridgeModeler_1
+
+    ' === 2. Get User Deck Sections ===
+    Dim nSections As Long, secNames() As String, bridgeSectionTypes() As Long
+    Dim ret As Long
+    ret = BM.deckSection.GetNameList(nSections, secNames, bridgeSectionTypes)
+    If ret <> 0 Or nSections = 0 Then
+        MsgBox "No User deck sections found in this model.", vbCritical
+        Exit Sub
+    End If
+
+    ' === 3. User selects section ===
+    Dim pickList As String, i As Long, userIdx As Long, sectionName As String
+    pickList = ""
+    For i = 0 To nSections - 1
+        pickList = pickList & (i + 1) & ". " & secNames(i) & vbCrLf
+    Next i
+    userIdx = Application.InputBox("Select deck section by NUMBER:" & vbCrLf & pickList, "Pick Section", 1, Type:=1)
+    If userIdx < 1 Or userIdx > nSections Then Exit Sub
+    sectionName = secNames(userIdx - 1)
+
+    ' === 4. Store Reference Point (for verification only) ===
+    Dim XrefOriginal As Double, YrefOriginal As Double
+    ret = BM.deckSection.GetReferencePoint(sectionName, XrefOriginal, YrefOriginal)
+    If ret <> 0 Then
+        MsgBox "Failed to get reference point for section '" & sectionName & "'.", vbCritical
+        Exit Sub
+    End If
+
+    ' === 5. Handle existing polygons ===
+    Dim nPolygons As Long, polygonNames() As String, polygonTypes() As Long, polygonNpts() As Long
+    Dim exteriorPolygonName As String, hasExterior As Boolean
+    ret = BM.deckSection.User.GetPolygonNameList(sectionName, nPolygons, polygonNames, polygonTypes, polygonNpts)
+    
+    ' Find exterior polygon (Type 1 = Solid)
+    hasExterior = False
+    If ret = 0 And nPolygons > 0 Then
+        For i = 0 To nPolygons - 1
+            If polygonTypes(i) = 1 Then ' Solid polygon (exterior)
+                exteriorPolygonName = polygonNames(i)
+                hasExterior = True
+                Exit For
+            End If
+        Next i
+        
+        ' Delete only interior polygons (voids)
+        Dim clearChoice As VbMsgBoxResult
+        clearChoice = MsgBox("Found " & nPolygons & " existing polygons." & vbCrLf & _
+                            "Delete existing VOID polygons before adding new ones?" & vbCrLf & _
+                            "(Exterior polygon will be modified, not deleted)", vbYesNo + vbQuestion, "Clear Existing Voids")
+        If clearChoice = vbYes Then
+            For i = 0 To nPolygons - 1
+                If polygonTypes(i) = 2 Then ' Opening/void polygon
+                    ret = BM.deckSection.User.DeletePolygon(sectionName, polygonNames(i))
+                    If ret <> 0 Then
+                        MsgBox "Warning: Failed to delete void polygon '" & polygonNames(i) & "'", vbExclamation
+                    End If
+                End If
+            Next i
+        End If
+    End If
+
+    ' === 6. Get Excel workbook and worksheet ===
+    MsgBox "Select workbook/sheet with polygon geometry data.", vbInformation
+    Dim wb As Workbook, ws As Worksheet
+    Dim wbList As String, wsList As String
+    Dim wbCount As Integer, wsCount As Integer
+    Dim wbIndex As Integer, wsIndex As Integer
+    Dim wbArray() As Workbook, wsArray() As Worksheet
+
+    wbCount = Application.Workbooks.Count
+    If wbCount = 0 Then MsgBox "No workbooks open.", vbCritical: Exit Sub
+    ReDim wbArray(1 To wbCount)
+    wbList = ""
+    i = 0
+    For Each wb In Application.Workbooks
+        i = i + 1
+        Set wbArray(i) = wb
+        wbList = wbList & i & ". " & wb.name & vbCrLf
+    Next wb
+    wbIndex = Application.InputBox("Select workbook by NUMBER:" & vbCrLf & wbList, "Pick Workbook", 1, Type:=1)
+    If wbIndex < 1 Or wbIndex > wbCount Then Exit Sub
+    Set wb = wbArray(wbIndex)
+
+    wsCount = wb.Worksheets.Count
+    If wsCount = 0 Then MsgBox "No worksheets found in workbook.", vbCritical: Exit Sub
+    ReDim wsArray(1 To wsCount)
+    wsList = ""
+    i = 0
+    For Each ws In wb.Worksheets
+        i = i + 1
+        Set wsArray(i) = ws
+        wsList = wsList & i & ". " & ws.name & vbCrLf
+    Next ws
+    wsIndex = Application.InputBox("Select worksheet by NUMBER:" & vbCrLf & wsList, "Pick Worksheet", 1, Type:=1)
+    If wsIndex < 1 Or wsIndex > wsCount Then Exit Sub
+    Set ws = wsArray(wsIndex)
+
+    ' === 7. Read number of voids from Excel E2 ===
+    Dim numVoids As Long
+    numVoids = 0
+    If IsNumeric(ws.Range("E2").Value) Then
+        numVoids = CLng(ws.Range("E2").Value)
+    End If
+    
+    MsgBox "Found " & numVoids & " voids in Excel E2." & vbCrLf & _
+           "Will create 1 exterior polygon + " & numVoids & " interior polygons.", vbInformation
+
+    ' === 8. Get Excel data ranges ===
+    Dim colX As String, colY As String, startRow As Long
+    colX = InputBox("Enter column letter for X coordinates (e.g., 'B'):", "X Column", "B")
+    colY = InputBox("Enter column letter for Y coordinates (e.g., 'C'):", "Y Column", "C")
+    startRow = Application.InputBox("Enter first data row number for EXTERIOR polygon:", "Exterior Start Row", 5, Type:=1)
+    If startRow < 1 Then Exit Sub
+
+    ' === 9. Handle Exterior Polygon ===
+    Dim extMaterial As String
+    extMaterial = InputBox("Enter material name for exterior polygon (leave blank for default):", "Exterior Material", "")
+    
+    If hasExterior Then
+        ' Modify existing exterior polygon
+        Call ModifyExistingPolygonFromExcel(BM, sectionName, ws, colX, colY, startRow, exteriorPolygonName, extMaterial)
+    Else
+        ' Create new exterior polygon
+        Call CreatePolygonFromExcel(BM, sectionName, ws, colX, colY, startRow, "Exterior", 1, extMaterial)
+    End If
+
+    ' === 10. Create Interior Polygons (Voids) ===
+    If numVoids > 0 Then
+        Dim voidIdx As Long
+        For voidIdx = 1 To numVoids
+            Dim voidStartRow As Long
+            voidStartRow = Application.InputBox("Enter first data row number for VOID " & voidIdx & ":", "Void " & voidIdx & " Start Row", startRow + 20, Type:=1)
+            If voidStartRow < 1 Then Exit Sub
+            
+            Call CreatePolygonFromExcel(BM, sectionName, ws, colX, colY, voidStartRow, "Void_" & voidIdx, 2, "")
+        Next voidIdx
+    End If
+
+    ' === 11. Verify Reference Point Unchanged ===
+    Dim XrefFinal As Double, YrefFinal As Double
+    ret = BM.deckSection.GetReferencePoint(sectionName, XrefFinal, YrefFinal)
+    If ret = 0 Then
+        If Abs(XrefFinal - XrefOriginal) > 0.001 Or Abs(YrefFinal - YrefOriginal) > 0.001 Then
+            MsgBox "WARNING: Reference point changed during operation!" & vbCrLf & _
+                   "Original: (" & Format(XrefOriginal, "0.000") & ", " & Format(YrefOriginal, "0.000") & ")" & vbCrLf & _
+                   "Final: (" & Format(XrefFinal, "0.000") & ", " & Format(YrefFinal, "0.000") & ")", vbExclamation
+        End If
+    End If
+
+    MsgBox "Polygon operations completed successfully!" & vbCrLf & _
+           "Updated exterior polygon + created " & numVoids & " void polygons." & vbCrLf & _
+           "Reference point maintained at: (" & Format(XrefOriginal, "0.000") & ", " & Format(YrefOriginal, "0.000") & ")", vbInformation
+
+End Sub
+
+' === HELPER SUBROUTINES ===
+Private Sub ModifyExistingPolygonFromExcel(BM As CSiBridge1.cBridgeModeler_1, sectionName As String, ws As Worksheet, _
+                                          colX As String, colY As String, startRow As Long, _
+                                          polygonName As String, material As String)
+    
+    ' First, get the existing polygon to preserve its current properties
+    Dim existingType As Long
+    Dim existingMaterial As String
+    Dim existingNpts As Long
+    Dim existingX() As Double
+    Dim existingY() As Double
+    Dim existingR() As Double
+    
+    Dim ret As Long
+    ret = BM.deckSection.User.GetPolygon(sectionName, polygonName, existingType, existingMaterial, existingNpts, existingX, existingY, existingR)
+    If ret <> 0 Then
+        MsgBox "Failed to get existing polygon '" & polygonName & "'. Return code: " & ret, vbCritical
+        Exit Sub
+    End If
+    
+    ' Use existing material if new material is empty
+    If material = "" Then
+        material = existingMaterial
+    End If
+    
+    ' Read points from Excel until empty cell found
+    Dim nPts As Long
+    nPts = 0
+    Do While Trim(ws.Range(colX & (startRow + nPts)).Value) <> ""
+        nPts = nPts + 1
+    Loop
+    
+    If nPts < 3 Then
+        MsgBox "Insufficient points for exterior polygon (found " & nPts & ", need at least 3)", vbExclamation
+        Exit Sub
+    End If
+
+    ' Create coordinate arrays
+    Dim xPoly() As Double, yPoly() As Double, radiusPoly() As Double
+    ReDim xPoly(nPts - 1)
+    ReDim yPoly(nPts - 1)
+    ReDim radiusPoly(nPts - 1)
+    
+    ' Read coordinates from Excel with error handling
+    On Error GoTo CoordError
+    Dim i As Long
+    For i = 0 To nPts - 1
+        If Not IsNumeric(ws.Range(colX & (startRow + i)).Value) Or Not IsNumeric(ws.Range(colY & (startRow + i)).Value) Then
+            MsgBox "Invalid coordinate data at row " & (startRow + i), vbCritical
+            Exit Sub
+        End If
+        xPoly(i) = CDbl(ws.Range(colX & (startRow + i)).Value)
+        yPoly(i) = CDbl(ws.Range(colY & (startRow + i)).Value)
+        radiusPoly(i) = 0 ' Straight segments
+    Next i
+    On Error GoTo 0
+
+    ' Modify existing polygon using SetPolygon (following the pattern from your working shift codes)
+    ret = BM.deckSection.User.SetPolygon(sectionName, polygonName, material, nPts, xPoly, yPoly, radiusPoly)
+    If ret <> 0 Then
+        MsgBox "Failed to modify exterior polygon '" & polygonName & "'. Return code: " & ret, vbCritical
+    Else
+        MsgBox "Modified exterior polygon '" & polygonName & "' with " & nPts & " points using material '" & material & "'.", vbInformation
+    End If
+    Exit Sub
+
+CoordError:
+    MsgBox "Error reading coordinate data from Excel. Please check your data format.", vbCritical
+    Exit Sub
+End Sub
+
+Private Sub CreatePolygonFromExcel(BM As CSiBridge1.cBridgeModeler_1, sectionName As String, ws As Worksheet, _
+                                  colX As String, colY As String, startRow As Long, _
+                                  polygonName As String, polygonType As Long, material As String)
+    ' Read points from Excel until empty cell found
+    Dim nPts As Long
+    nPts = 0
+    Do While Trim(ws.Range(colX & (startRow + nPts)).Value) <> ""
+        nPts = nPts + 1
+    Loop
+    
+    If nPts < 3 Then
+        MsgBox "Insufficient points for polygon '" & polygonName & "' (found " & nPts & ", need at least 3)", vbExclamation
+        Exit Sub
+    End If
+
+    ' Create coordinate arrays
+    Dim xPoly() As Double, yPoly() As Double, radiusPoly() As Double
+    ReDim xPoly(nPts - 1)
+    ReDim yPoly(nPts - 1)
+    ReDim radiusPoly(nPts - 1)
+    
+    ' Read coordinates from Excel with error handling
+    On Error GoTo CoordError
+    Dim i As Long
+    For i = 0 To nPts - 1
+        If Not IsNumeric(ws.Range(colX & (startRow + i)).Value) Or Not IsNumeric(ws.Range(colY & (startRow + i)).Value) Then
+            MsgBox "Invalid coordinate data at row " & (startRow + i), vbCritical
+            Exit Sub
+        End If
+        xPoly(i) = CDbl(ws.Range(colX & (startRow + i)).Value)
+        yPoly(i) = CDbl(ws.Range(colY & (startRow + i)).Value)
+        radiusPoly(i) = 0 ' Straight segments
+    Next i
+    On Error GoTo 0
+
+    ' Add polygon to section
+    Dim ret As Long
+    ret = BM.deckSection.User.AddNewPolygon(sectionName, polygonName, polygonType, material, nPts, xPoly, yPoly, radiusPoly)
+    If ret <> 0 Then
+        MsgBox "Failed to add polygon '" & polygonName & "'. Return code: " & ret, vbCritical
+    Else
+        MsgBox "Added polygon '" & polygonName & "' with " & nPts & " points.", vbInformation
+    End If
+    Exit Sub
+
+CoordError:
+    MsgBox "Error reading coordinate data from Excel. Please check your data format.", vbCritical
+    Exit Sub
+End Sub
+
+
