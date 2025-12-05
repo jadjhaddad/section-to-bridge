@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace BridgeSectionTransfer.Core.Models;
 
 public class Polygon

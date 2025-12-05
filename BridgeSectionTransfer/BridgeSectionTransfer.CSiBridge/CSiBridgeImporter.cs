@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using BridgeSectionTransfer.Core.Models;
-using CSiAPIv1;
+using CSiBridge1;
 
 namespace BridgeSectionTransfer.CSiBridge
 {
@@ -16,7 +16,7 @@ namespace BridgeSectionTransfer.CSiBridge
         {
             try
             {
-                cHelper helper = new cHelper();
+                cHelper helper = new Helper();
                 _bridgeObject = helper.GetObject("CSI.CSiBridge.API.SapObject") as cOAPI;
 
                 if (_bridgeObject == null)
@@ -81,12 +81,16 @@ namespace BridgeSectionTransfer.CSiBridge
                 }
 
                 // Add the deck section polygon
+                double[] radiusCoords = new double[numPoints]; // All zeros for polygons without curves
                 int ret = bridgeModeler.DeckSection.User.AddNewPolygon(
                     sectionName,
+                    "Exterior",
+                    1,  // PolygonType.Solid
+                    "CONC",  // Default material name
                     numPoints,
                     ref xCoords,
                     ref yCoords,
-                    1  // PolygonType.Solid
+                    ref radiusCoords
                 );
 
                 if (ret != 0)
@@ -112,12 +116,16 @@ namespace BridgeSectionTransfer.CSiBridge
                         voidYCoords[i] = voidPoly.Points[i].Y;
                     }
 
+                    double[] voidRadiusCoords = new double[voidNumPoints]; // All zeros for polygons without curves
                     ret = bridgeModeler.DeckSection.User.AddNewPolygon(
-                        $"{sectionName}_{voidPoly.Name}",
+                        sectionName,
+                        voidPoly.Name,
+                        2,  // PolygonType.Opening
+                        "CONC",  // Default material name
                         voidNumPoints,
                         ref voidXCoords,
                         ref voidYCoords,
-                        2  // PolygonType.Opening
+                        ref voidRadiusCoords
                     );
 
                     if (ret != 0)
@@ -176,9 +184,10 @@ namespace BridgeSectionTransfer.CSiBridge
             {
                 int numSections = 0;
                 string[] sectionNames = null;
+                int[] sectionTypes = null;
 
                 var bridgeModeler = _model.BridgeModeler_1;
-                int ret = bridgeModeler.DeckSection.User.GetNameList(ref numSections, ref sectionNames);
+                int ret = bridgeModeler.DeckSection.GetNameList(ref numSections, ref sectionNames, ref sectionTypes);
 
                 if (ret == 0 && sectionNames != null)
                 {

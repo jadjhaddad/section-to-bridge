@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ApplicationPackage
+    SchemaVersion="1.0"
+    AutodeskProduct="Civil3D"
+    ProductType="Application"
+    Name="BridgeSectionTransfer"
+    Description="Export bridge deck sections from Civil 3D"
+    AppVersion="1.0.0"
+    Author="Your Name"
+    ProductCode="{DD7ADE04-058C-4E4D-AFC3-4E6DD346AD58}"
+    UpgradeCode="{DD7ADE04-058C-4E4D-AFC3-4E6DD346AD59}">
+
+  <CompanyDetails
+    Name="Your Company"
+    Url="https://yourcompany.com"
+    Email="support@yourcompany.com"/>
+
+  <Components Description="Main plugin components">
+    <RuntimeRequirements
+      OS="Win64"
+      Platform="Civil3D"
+      SeriesMin="C3D2024"
+      SeriesMax="C3D2025"/>
+
+    <ComponentEntry
+      AppName="BridgeSectionTransfer"
+      ModuleName="./BridgeSectionTransfer.Civil3D.dll"
+      AppDescription="Bridge Section Transfer for Civil 3D"
+      LoadOnCommandInvocation="False"
+      LoadOnAutoCADStartup="True">
+
+      <Commands GroupName="BridgeSectionTransfer">
+        <Command Global="ExportDeckSection" Local="ExportDeckSection"/>
+      </Commands>
+    </ComponentEntry>
+  </Components>
+</ApplicationPackage>

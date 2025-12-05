@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Windows.Forms;
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
@@ -12,6 +14,54 @@ using BridgeSectionTransfer.Core.Services;
 
 namespace BridgeSectionTransfer.Civil3D
 {
+    /// <summary>
+    /// Handles assembly loading for System.Text.Json dependencies
+    /// Required because NETLOAD doesn't process .dll.config files
+    /// </summary>
+    public class Initializer : IExtensionApplication
+    {
+        public void Initialize()
+        {
+            AppDomain.CurrentDomain.AssemblyResolve += OnAssemblyResolve;
+        }
+
+        public void Terminate()
+        {
+            AppDomain.CurrentDomain.AssemblyResolve -= OnAssemblyResolve;
+        }
+
+        private Assembly OnAssemblyResolve(object sender, ResolveEventArgs args)
+        {
+            AssemblyName requestedAssembly = new AssemblyName(args.Name);
+            string pluginDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+
+            // Handle all System.Text.Json dependencies
+            string[] dependencies = new[]
+            {
+                "System.Text.Json",
+                "System.Runtime.CompilerServices.Unsafe",
+                "System.Text.Encodings.Web",
+                "System.Memory",
+                "System.Buffers",
+                "Microsoft.Bcl.AsyncInterfaces",
+                "System.Threading.Tasks.Extensions",
+                "System.ValueTuple",
+                "System.Numerics.Vectors"
+            };
+
+            if (dependencies.Contains(requestedAssembly.Name))
+            {
+                string assemblyPath = Path.Combine(pluginDir, requestedAssembly.Name + ".dll");
+                if (File.Exists(assemblyPath))
+                {
+                    return Assembly.LoadFrom(assemblyPath);
+                }
+            }
+
+            return null;
+        }
+    }
+
     public class Commands
     {
         private readonly GeometryCalculator _geomCalc = new GeometryCalculator();
@@ -127,6 +177,30 @@ namespace BridgeSectionTransfer.Civil3D
 
             ed.WriteMessage($"Reference Point: ({section.ReferencePoint.X:F4}, {section.ReferencePoint.Y:F4}) - {section.ReferencePoint.Description}\n");
 
+            // Step 8.5: Calculate centerlines and cutlines automatically
+            try
+            {
+                ed.WriteMessage("\nCalculating centerlines and cutlines...\n");
+
+                var centerlineCalc = new CenterlineCalculator(_geomCalc);
+                centerlineCalc.CalculateCenterlinesAndCutlines(section);
+
+                ed.WriteMessage($"Calculated {section.Centerlines.Count} centerlines\n");
+                ed.WriteMessage($"Calculated {section.Cutlines.Count} cutlines\n");
+
+                // Display centerline summary
+                foreach (var cl in section.Centerlines)
+                {
+                    ed.WriteMessage($"  {cl.Type}: {cl.Description}\n");
+                }
+            }
+            catch (Exception ex)
+            {
+                ed.WriteMessage($"\nWARNING: Failed to calculate centerlines: {ex.Message}\n");
+                ed.WriteMessage("Continuing with section export without centerlines.\n");
+                // Don't fail the entire export, just skip centerlines
+            }
+
             // Step 9: Export to JSON
             SaveFileDialog sfd = new SaveFileDialog
             {
@@ -149,6 +223,8 @@ namespace BridgeSectionTransfer.Civil3D
             ed.WriteMessage($"Section: {section.Name}\n");
             ed.WriteMessage($"Exterior vertices: {section.ExteriorBoundary.Points.Count}\n");
             ed.WriteMessage($"Voids: {section.InteriorVoids.Count}\n");
+            ed.WriteMessage($"Centerlines: {section.Centerlines.Count}\n");
+            ed.WriteMessage($"Cutlines: {section.Cutlines.Count}\n");
         }
 
         private Polygon ExtractPolygon(Polyline poly, string name)

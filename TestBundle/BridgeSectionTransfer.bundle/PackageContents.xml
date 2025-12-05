@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ApplicationPackage SchemaVersion="1.0"
+                    AutodeskProduct="AutoCAD"
+                    ProductType="Application"
+                    Name="BridgeSectionTransfer"
+                    Description="Bridge Section Transfer Plugin for Civil 3D"
+                    AppVersion="1.0.0"
+                    Author="Bridge Transfer Team"
+                    ProductCode="{F8A89D12-4B56-4C3E-9876-12345678ABCD}"
+                    UpgradeCode="{F8A89D12-4B56-4C3E-9876-12345678ABCE}">
+  <CompanyDetails Name="Bridge Engineering"
+                  Url="https://example.com"
+                  Email="support@example.com"/>
+  <Components Description="Bridge Section Transfer Components">
+    <RuntimeRequirements SeriesMin="R24.0" SeriesMax="R25.0" Platform="Win64" OS="Win7|Win8|Win10|Win11"/>
+    <ComponentEntry AppName="BridgeSectionTransfer"
+                    Version="1.0.0"
+                    ModuleName="./Contents/BridgeSectionTransfer.Civil3D.dll"
+                    AppDescription="Exports bridge deck sections from Civil 3D to JSON format"
+                    LoadOnCommandInvocation="False"
+                    LoadOnAutoCADStartup="True">
+      <Commands GroupName="BridgeSection">
+        <Command Local="ExportDeckSection" Global="ExportDeckSection"/>
+      </Commands>
+    </ComponentEntry>
+  </Components>
+</ApplicationPackage>

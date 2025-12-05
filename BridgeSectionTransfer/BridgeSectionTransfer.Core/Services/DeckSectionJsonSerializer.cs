@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using BridgeSectionTransfer.Core.Models;
@@ -102,6 +106,24 @@ public class DeckSectionJsonSerializer
                     Name = v.Name,
                     Points = v.Points.Select(p => new Point2DDto { X = p.X, Y = p.Y }).ToList()
                 })
+                .ToList(),
+            Centerlines = section.Centerlines
+                .Select(cl => new CenterlineDto
+                {
+                    Name = cl.Name,
+                    Points = cl.Points.Select(p => new Point2DDto { X = p.X, Y = p.Y }).ToList(),
+                    Type = cl.Type.ToString(),
+                    Description = cl.Description
+                })
+                .ToList(),
+            Cutlines = section.Cutlines
+                .Select(cut => new CutlineDto
+                {
+                    Name = cut.Name,
+                    Points = cut.Points.Select(p => new Point2DDto { X = p.X, Y = p.Y }).ToList(),
+                    Type = cut.Type.ToString(),
+                    Description = cut.Description
+                })
                 .ToList()
         };
     }
@@ -141,6 +163,22 @@ public class DeckSectionJsonSerializer
                     Type = PolygonType.Opening,
                     Points = v.Points.Select(p => new Point2D(p.X, p.Y)).ToList()
                 })
+                .ToList(),
+            Centerlines = dto.Centerlines
+                .Select(clDto => new Centerline(
+                    clDto.Points.Select(p => new Point2D(p.X, p.Y)).ToList(),
+                    Enum.Parse<CenterlineType>(clDto.Type),
+                    clDto.Name,
+                    clDto.Description
+                ))
+                .ToList(),
+            Cutlines = dto.Cutlines
+                .Select(cutDto => new Cutline(
+                    cutDto.Points.Select(p => new Point2D(p.X, p.Y)).ToList(),
+                    Enum.Parse<CutlineType>(cutDto.Type),
+                    cutDto.Name,
+                    cutDto.Description
+                ))
                 .ToList()
         };
     }

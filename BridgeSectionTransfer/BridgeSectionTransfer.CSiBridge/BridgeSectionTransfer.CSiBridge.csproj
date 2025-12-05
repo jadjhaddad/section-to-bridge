@@ -67,12 +67,29 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="CSiBridgeImporter.cs" />
     <Compile Include="ImportOptions.cs" />
+    <Compile Include="Commands.cs" />
+    <Compile Include="Plugin.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="System.Windows.Forms" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\BridgeSectionTransfer.Core\BridgeSectionTransfer.Core.csproj">
       <Project>{dd7ade04-058c-4e4d-afc3-4e6dd346ad58}</Project>
       <Name>BridgeSectionTransfer.Core</Name>
+      <Private>True</Private>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <Target Name="CopyNuGetDependencies" AfterTargets="Build">
+    <Message Text="Copying System.Text.Json and all dependencies..." Importance="high" />
+    <Copy SourceFiles="$(UserProfile)\.nuget\packages\system.text.json\6.0.10\lib\net461\System.Text.Json.dll" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(UserProfile)\.nuget\packages\system.runtime.compilerservices.unsafe\6.0.0\lib\net461\System.Runtime.CompilerServices.Unsafe.dll" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(UserProfile)\.nuget\packages\system.text.encodings.web\6.0.0\lib\net461\System.Text.Encodings.Web.dll" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(UserProfile)\.nuget\packages\system.memory\4.5.5\lib\net461\System.Memory.dll" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(UserProfile)\.nuget\packages\system.buffers\4.5.1\lib\net461\System.Buffers.dll" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(UserProfile)\.nuget\packages\microsoft.bcl.asyncinterfaces\6.0.0\lib\net461\Microsoft.Bcl.AsyncInterfaces.dll" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(UserProfile)\.nuget\packages\system.threading.tasks.extensions\4.5.4\lib\net461\System.Threading.Tasks.Extensions.dll" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(UserProfile)\.nuget\packages\system.valuetuple\4.5.0\lib\net461\System.ValueTuple.dll" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

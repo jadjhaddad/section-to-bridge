@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+
 namespace BridgeSectionTransfer.Core.Services;
 
 public class BridgeDeckSectionsData
@@ -25,6 +28,8 @@ public class DeckSectionDto
     public MaterialPropertiesDto Material { get; set; } = new();
     public List<Point2DDto> ExteriorBoundary { get; set; } = new();
     public List<VoidDto> InteriorVoids { get; set; } = new();
+    public List<CenterlineDto> Centerlines { get; set; } = new();
+    public List<CutlineDto> Cutlines { get; set; } = new();
 }
 
 public class Point2DDto
@@ -51,4 +56,20 @@ public class VoidDto
 {
     public string Name { get; set; } = string.Empty;
     public List<Point2DDto> Points { get; set; } = new();
+}
+
+public class CenterlineDto
+{
+    public string Name { get; set; } = string.Empty;
+    public List<Point2DDto> Points { get; set; } = new();
+    public string Type { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+}
+
+public class CutlineDto
+{
+    public string Name { get; set; } = string.Empty;
+    public List<Point2DDto> Points { get; set; } = new();
+    public string Type { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
 }
